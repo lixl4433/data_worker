@@ -1,0 +1,160 @@
+{% extends "layout.html" %}
+{% block title %}AI 选股 - 量化选股系统{% endblock %}
+{% block head %}
+<style>
+/* 提示词弹框 */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(2px);
+}
+.modal-overlay.show { display: flex; }
+.modal-box {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--card-border, #e4e7ed);
+    border-radius: 12px;
+    width: 92%;
+    max-width: 820px;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    animation: modalIn 0.2s ease;
+}
+@keyframes modalIn {
+    from { opacity:0; transform:translateY(-20px) scale(0.97); }
+    to { opacity:1; transform:translateY(0) scale(1); }
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--card-border, #e4e7ed);
+}
+.modal-header h3 { margin:0; font-size:15px; font-weight:600; }
+.modal-close {
+    cursor: pointer;
+    font-size: 18px;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px;
+    color: var(--text-secondary, #86909c);
+    transition: all 0.15s;
+}
+.modal-close:hover { background: var(--card-hover, #f5f7fa); color: var(--text, #1d2129); }
+.modal-body {
+    padding: 16px 20px;
+    flex: 1;
+    overflow-y: auto;
+}
+.modal-body textarea {
+    width: 100%;
+    min-height: 360px;
+    font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+    font-size: 13px;
+    padding: 14px;
+    border: 1px solid var(--card-border, #e4e7ed);
+    border-radius: 8px;
+    background: var(--card-hover, #f5f7fa);
+    color: var(--text, #1d2129);
+    resize: vertical;
+    line-height: 1.65;
+    transition: border-color 0.2s;
+}
+.modal-body textarea:focus { outline:none; border-color:var(--blue, #165dff); box-shadow: 0 0 0 2px rgba(22,93,255,0.08); }
+.modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 12px 20px;
+    border-top: 1px solid var(--card-border, #e4e7ed);
+}
+.modal-footer .btn { font-size:12px; padding:6px 16px; }
+</style>
+{% endblock %}
+
+
+{% block content %}
+<!-- 提示词弹框 -->
+<div class="modal-overlay" id="promptModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3>📝 AI 选股提示词</h3>
+            <span class="modal-close" onclick="closePromptModal()">✕</span>
+        </div>
+        <div class="modal-body">
+            <textarea id="promptContent" placeholder="加载中..."></textarea>
+        </div>
+        <div class="modal-footer">
+            <span style="font-size:11px;color:var(--text-secondary);margin-right:auto;" id="promptStatus"></span>
+            <button class="btn btn-ghost" onclick="resetPromptToDefault()">↩️ 还原默认</button>
+            <button class="btn btn-ghost" onclick="setPromptAsDefault()">⭐ 设为默认</button>
+            <button class="btn btn-primary" onclick="savePrompt()">💾 保存</button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">
+        <span>🤖 AI 选股（5 模型对比） <button class="btn btn-ghost btn-sm" onclick="openPromptModal()" style="font-size:12px; padding:3px 10px; vertical-align:middle;">📝 提示词</button></span>
+        <span class="sub">DeepSeek / Kimi 自动 + Gemini / Grok / ChatGPT 手动导入</span>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <button class="btn btn-primary" id="btnAiAnalyze" onclick="startAIAnalysis()">🚀 开始 AI 分析</button>
+        <span style="font-size:12px;color:var(--text-secondary);align-self:center;">
+            当前: <strong id="aiSourceLabel">综合评分</strong>
+        </span>
+    </div>
+
+    <!-- 5 模型卡片 -->
+    <div class="models-grid">
+        {% for model in ['deepseek', 'kimi', 'gemini', 'grok', 'chatgpt'] %}
+        <div class="model-card">
+            <div class="mc-header">
+                <div class="mc-title">
+                    {% if model == 'deepseek' %}<span style="color:#2ecc71;">🧠</span> DeepSeek <span class="badge auto">自动</span>
+                    {% elif model == 'kimi' %}<span style="color:#3498db;">🌐</span> Kimi <span class="badge auto">自动</span>
+                    {% elif model == 'gemini' %}<span style="color:#f39c12;">🪐</span> Gemini <span class="badge manual">手动</span>
+                    {% elif model == 'grok' %}<span style="color:#e74c3c;">⚡</span> Grok <span class="badge manual">手动</span>
+                    {% elif model == 'chatgpt' %}<span style="color:#10a37f;">💬</span> ChatGPT <span class="badge manual">手动</span>
+                    {% endif %}
+                </div>
+                <span class="mc-count" id="count-{{ model }}">0 只</span>
+            </div>
+            <div class="mc-actions">
+                <button class="btn btn-ghost btn-sm" onclick="switchAISource('{{ model }}')">查看</button>
+                {% if model in ['gemini', 'grok', 'chatgpt'] %}
+                <button class="btn btn-ghost btn-sm" onclick="toggleImport('{{ model }}')">📥 导入</button>
+                {% endif %}
+            </div>
+            {% if model in ['gemini', 'grok', 'chatgpt'] %}
+            <div class="import-area" id="import-{{ model }}" style="display:none; margin-bottom:8px;">
+                <textarea id="importText-{{ model }}" placeholder='{"stocks":[{"code":"688256","name":"寒武纪","sector":"AI芯片","reason":"..."}]}'></textarea>
+                <div class="import-actions">
+                    <button class="btn btn-success btn-sm" onclick="doImport('{{ model }}')">导入</button>
+                    <span class="import-status" id="importStatus-{{ model }}"></span>
+                </div>
+            </div>
+            {% endif %}
+            <div class="mc-table-wrap">
+                <table><thead><tr><th>#</th><th>代码</th><th>名称</th><th>题材</th><th>理由</th></tr></thead><tbody id="table-{{ model }}"></tbody></table>
+            </div>
+            <div class="pagination" id="pag-{{ model }}"></div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pages/ai_analysis.js?v=2"></script>
+{% endblock %}
+
+

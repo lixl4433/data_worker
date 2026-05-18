@@ -1,0 +1,81 @@
+{% extends "layout.html" %}
+{% block title %}数据更新 - 量化选股系统{% endblock %}
+{% block head %}
+<style>
+    .log-container {
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: 'Consolas', 'Courier New', monospace;
+        font-size: 12px;
+        line-height: 1.6;
+        background: #1e1e1e;
+        color: #d4d4d4;
+        padding: 10px 14px;
+        border-radius: 8px;
+        margin-top: 8px;
+    }
+    .log-container .log-ok { color: #4ec9b0; }
+    .log-container .log-fail { color: #f44747; }
+    .log-container .log-info { color: #569cd6; }
+    .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+        margin: 8px 0;
+    }
+    .stat-item {
+        background: rgba(52,152,219,0.08);
+        padding: 8px 12px;
+        border-radius: 6px;
+        text-align: center;
+    }
+    .stat-item .num { font-size: 20px; font-weight: bold; color: #3498db; }
+    .stat-item .label { font-size: 11px; color: #888; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-title">
+        <span>📊 数据更新</span>
+        <span class="sub">全量（TuShare Pro） / 增量（补缺失） / 实时（Pytdx 当天）</span>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <button class="btn btn-primary" id="btnUpdateFull" onclick="updateFull()">📦 全量</button>
+        <button class="btn btn-success" id="btnUpdateIncremental" onclick="updateIncremental()">📥 增量</button>
+        <button class="btn btn-warning" id="btnUpdateRealtime" onclick="updateRealtime()">⚡ 实时</button>
+    </div>
+    <div id="updateProgressRow" style="display:none; padding:8px 12px; background:rgba(52,152,219,0.1); border-radius:8px; font-size:12px;">
+        <span class="loading-dots"></span> <span id="updateProgressText">启动中...</span>
+    </div>
+</div>
+
+<!-- 数据库概览 -->
+<div class="card">
+    <div class="card-title">
+        <span>📈 数据库概览</span>
+        <span class="sub" id="dbOverviewSub">加载中...</span>
+    </div>
+    <div class="stat-grid" id="dbStats">
+        <div class="stat-item"><div class="num" id="statDays">-</div><div class="label">交易日</div></div>
+        <div class="stat-item"><div class="num" id="statRows">-</div><div class="label">总记录数</div></div>
+        <div class="stat-item"><div class="num" id="statStart">-</div><div class="label">起始日期</div></div>
+        <div class="stat-item"><div class="num" id="statEnd">-</div><div class="label">最近日期</div></div>
+    </div>
+</div>
+
+<!-- 更新日志 -->
+<div class="card">
+    <div class="card-title">
+        <span>📋 更新日志</span>
+        <span class="sub" id="logSub">运行中会实时显示每个交易日的写入情况</span>
+    </div>
+    <div class="log-container" id="logContainer">
+        <div class="log-info">等待更新任务启动...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pages/data_update.js"></script>
+{% endblock %}

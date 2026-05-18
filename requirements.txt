@@ -1,0 +1,37 @@
+# ============================================================
+# 量化选股系统 - Python 依赖
+# ============================================================
+# 安装命令：
+#   pip install -r requirements.txt
+#
+# 注意：
+# - 本项目不需要 GPU / CUDA / PyTorch
+# - 所有 AI 分析调用的是外部大模型 API（Gemini/DeepSeek/OpenAI/Grok/Kimi）
+# - 数据下载使用 akshare / tushare / pytdx（免费开源 A 股数据接口）
+# ============================================================
+
+# ---- Web 服务 ----
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.2
+httpx>=0.25.0
+python-multipart>=0.0.6
+
+# ---- 数据处理 ----
+pandas>=2.0.0
+numpy>=1.24.0
+
+# ---- A 股数据接口 ----
+akshare>=1.14.0
+tushare>=1.4.0
+pytdx>=1.0.0
+
+# ---- AI 大模型 API ----
+# Gemini
+google-genai>=1.0.0
+
+# DeepSeek / OpenAI / Grok / Kimi（都是 OpenAI 兼容格式）
+openai>=1.6.0
+
+# ---- 其他 ----
+requests>=2.31.0

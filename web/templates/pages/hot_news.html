@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+{% block title %}热点新闻 - 量化选股系统{% endblock %}
+{% block head %}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-title">
+        <span>🔥 热点新闻聚合</span>
+        <span class="sub">采集 5 个来源 → DeepSeek 聚合分析 → 精简摘要</span>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <button class="btn btn-primary" id="btnHotNews" onclick="loadHotNews()">🔄 刷新热点新闻</button>
+        <span style="font-size:12px;color:var(--text-secondary);align-self:center;">
+            📅 历史记录:
+            <select id="hotNewsDateSelect" onchange="switchHotNewsDate()" style="margin-left:4px;"></select>
+        </span>
+        <span id="hotNewsStatus" style="font-size:12px;color:var(--text-secondary);align-self:center;"></span>
+    </div>
+    <div id="hotNewsContent" style="display:none; padding:12px; background:rgba(0,0,0,0.03); border-radius:8px; font-size:13px; line-height:1.7; white-space:pre-wrap; font-family:'SF Mono','Consolas',monospace;"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pages/hot_news.js"></script>
+{% endblock %}

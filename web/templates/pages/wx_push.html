@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+{% block title %}微信推送 - 量化选股系统{% endblock %}
+{% block head %}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-title">
+        <span>📱 微信推送管理</span>
+        <span class="sub">通过 PushPlus 推送选股结果到微信</span>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <input type="text" id="wxIdInput" placeholder="输入微信号" style="padding:6px 10px; border:1px solid var(--card-border); border-radius:8px; font-size:12px; background:var(--card-bg); color:var(--text); flex:1; min-width:160px;">
+        <input type="text" id="wxRemarkInput" placeholder="备注（可选）" style="padding:6px 10px; border:1px solid var(--card-border); border-radius:8px; font-size:12px; background:var(--card-bg); color:var(--text); flex:1; min-width:120px;">
+        <button class="btn btn-success btn-sm" onclick="addWxPush()">➕ 添加</button>
+        <button class="btn btn-warning btn-sm" onclick="recomputeAndPush()" id="btnRecomputePush">📤 计算并推送</button>
+    </div>
+    <div class="result-table-wrap">
+        <table>
+            <thead><tr><th>ID</th><th>微信号</th><th>备注</th><th>添加时间</th><th>操作</th></tr></thead>
+            <tbody id="wxPushTbody"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pages/wx_push.js"></script>
+{% endblock %}

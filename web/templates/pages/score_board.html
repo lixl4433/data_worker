@@ -1,0 +1,93 @@
+{% extends "layout.html" %}
+{% block title %}综合评分 - 量化选股系统{% endblock %}
+{% block head %}
+<style>
+/* 综合评分表格紧凑样式 */
+.score-table { font-size: 12px; white-space: nowrap; }
+.score-table th { padding: 6px 6px !important; font-size: 11px !important; }
+.score-table td { padding: 6px 6px !important; }
+.score-table .reason-cell {
+    max-width: 160px;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.score-table .price-cell { font-size: 11px; }
+.score-table .price-cell.green { color: #2ecc71; }
+.score-table .price-cell.red { color: #e74c3c; }
+
+/* 自定义 tooltip 容器 - 独立于表格，避免 overflow 截断 */
+.tip-box {
+    display: none;
+    position: fixed;
+    background: #fff;
+    color: #333;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 6px 10px;
+    border: 1px solid #d0d5dd;
+    white-space: pre-wrap;
+    max-width: 400px;
+    min-width: 200px;
+    word-break: break-all;
+    z-index: 99999;
+    user-select: text;
+    pointer-events: auto;
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+<div class="card">
+    <div class="card-title">
+        <span>🏆 综合评分排行榜</span>
+        <span class="sub">多模型 AI 选股 → 多因子评分 → 技术面分析 → 买卖点建议</span>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <button class="btn btn-primary" id="btnComputeScore" onclick="computeStrongest()">📊 计算综合评分</button>
+        <span style="font-size:12px;color:var(--text-secondary);align-self:center;">
+            当前: <strong id="scoreSourceLabel">综合评分</strong>
+        </span>
+        <span style="font-size:12px;color:var(--text-secondary);align-self:center;">
+            共 <strong id="scoreTotalCount">0</strong> 只
+        </span>
+        <span style="font-size:12px;color:var(--text-secondary);align-self:center;margin-left:8px;">
+            📅 历史记录:
+            <select id="scoreDateSelect" onchange="switchScoreDate()" style="margin-left:4px;"></select>
+        </span>
+    </div>
+
+    <div class="result-table-wrap" style="overflow-x:auto;">
+        <table class="score-table">
+            <thead>
+                <tr>
+                    <th>#</th><th>代码</th><th>名称</th><th>行业</th><th>来源</th><th>策略</th>
+                    <th>现价</th><th>涨幅</th><th>量比</th><th>RSI背离</th><th>评分</th>
+                    <th title="支撑位1：近60日箱体底部（强支撑）">支撑①</th>
+                    <th title="支撑位2：近20日最低价（短期支撑）">支撑②</th>
+                    <th title="压力位1：近60日箱体顶部（强压力）">压力①</th>
+                    <th title="压力位2：近20日最高价（短期压力）">压力②</th>
+                    <th title="买入价：支撑位上方3%（趋势确认价）">买入价</th>
+                    <th title="卖出价：压力位下方2%（止盈位）">卖出价</th>
+                    <th title="止损价：支撑位下方3%">止损价</th>
+                    <th>评分说明</th>
+                    <th>理由</th>
+                </tr>
+            </thead>
+            <tbody id="scoreResultTbody"></tbody>
+        </table>
+    </div>
+    <div class="pagination" id="scoreResultPagination"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pages/score_board.js?v=2"></script>
+{% endblock %}

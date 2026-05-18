@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}量化选股系统{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/style.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+
+<div id="toastContainer" class="toast"></div>
+
+<!-- ====== 顶部导航 ====== -->
+<div class="header">
+    <div class="container">
+        <div class="logo">
+            <div class="icon">Q</div>
+            <h1>量化选股系统</h1>
+        </div>
+        <div class="header-right">
+            <div class="status-bar">
+                <span class="stat-item"><span class="dot green"></span>股票: <strong id="statStocks">-</strong></span>
+                <span class="stat-item"><span class="dot blue"></span>最新: <strong id="statDate">-</strong></span>
+                <span class="stat-item">记录: <strong id="statRecords">-</strong></span>
+            </div>
+            <span style="font-size:11px;color:rgba(255,255,255,0.5);" id="statTime"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ====== 标签导航（macOS 风格 Segment Control） ====== -->
+<div class="tab-nav">
+    <div class="container">
+        <a href="/score-board" class="tab-item {% if active_tab == 'score' %}active{% endif %}">
+            <span class="tab-icon">🏆</span> 综合评分
+        </a>
+        <a href="/ai-analysis" class="tab-item {% if active_tab == 'ai' %}active{% endif %}">
+            <span class="tab-icon">🤖</span> AI 选股
+        </a>
+        <a href="/hot-news" class="tab-item {% if active_tab == 'news' %}active{% endif %}">
+            <span class="tab-icon">🔥</span> 热点新闻
+        </a>
+        <a href="/longhu" class="tab-item {% if active_tab == 'longhu' %}active{% endif %}">
+            <span class="tab-icon">🐅</span> 龙虎榜
+        </a>
+        <a href="/trade-records" class="tab-item {% if active_tab == 'trade' %}active{% endif %}">
+            <span class="tab-icon">📈</span> 实盘记录
+        </a>
+        <a href="/" class="tab-item {% if active_tab == 'data' %}active{% endif %}">
+            <span class="tab-icon">📊</span> 数据更新
+        </a>
+        <a href="/wx-push" class="tab-item {% if active_tab == 'wx' %}active{% endif %}">
+            <span class="tab-icon">�</span> 微信推送
+        </a>
+    </div>
+</div>
+
+<div class="container">
+    {% block content %}{% endblock %}
+</div>
+
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+
+</body>
+</html>
