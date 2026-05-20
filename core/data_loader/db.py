@@ -163,6 +163,7 @@ def batch_insert(conn: sqlite3.Connection, df: pd.DataFrame, source: str = "tush
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, values)
             rows += len(values)
+        conn.commit()
     
     elif source == "realtime":
         # 实时更新：
