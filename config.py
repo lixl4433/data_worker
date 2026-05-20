@@ -31,11 +31,11 @@ DB_PATH = DATA_DIR / "quant_storage.db"
 # ============================================================
 
 # DeepSeek
-DEEPSEEK_API_KEY = ""
+DEEPSEEK_API_KEY = "sk-4f6c76610d64480c887b76c0f2601bab"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 # Kimi（月之暗面）
-KIMI_API_KEY = ""
+KIMI_API_KEY = "sk-QggnDxp2SrrEIvhE0jcgrJu8YaAx234YHq1Qt7MJkjsGbntR"
 KIMI_BASE_URL = "https://api.moonshot.cn/v1"
 
 # Gemini（Google） - 手动导入模式，无需配置 API Key
@@ -48,7 +48,7 @@ KIMI_BASE_URL = "https://api.moonshot.cn/v1"
 # ============================================================
 
 # TuShare Pro Token（用于获取历史行情）
-TUSHARE_TOKEN = ""
+TUSHARE_TOKEN = "6299df56e14a99ca5f31c5d4ee81d508b94e72b73501aaf80e923aca"
 
 # Pytdx 配置（直连券商行情站）
 # 多个备用 IP，连接失败自动切换

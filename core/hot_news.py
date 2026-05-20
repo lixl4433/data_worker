@@ -476,7 +476,7 @@ def get_hot_keywords(top_n: int = 50) -> list:
             if not title:
                 continue
             # 简单分词：按标点、空格分割，取有意义的词
-            words = re.split(r'[，。！？、；：""''（）\(\)\[\]【】\s/\\|]', title)
+            words = re.split(r'[，。！？、；：""''（）()\[\]【】\s/\\|]', title)
             for word in words:
                 word = word.strip()
                 # 过滤太短或无意义的词

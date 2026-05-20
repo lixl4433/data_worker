@@ -147,8 +147,7 @@ async def lifespan(app: FastAPI):
     logger.info("服务启动完成")
     yield
     logger.info("服务关闭")
-
-
+    
 app = FastAPI(title="量化选股系统", version="1.0.0", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
