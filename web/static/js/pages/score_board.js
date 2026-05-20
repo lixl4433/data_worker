@@ -22,7 +22,15 @@ function renderScoreResult() {
         var priceVal = (s.latest_close != null) ? s.latest_close.toFixed(2) : '-';
         var sourceLabels = '';
         if (s.sources && Array.isArray(s.sources)) {
-            sourceLabels = s.sources.join(', ');
+            var uniqueSources = [];
+            var seenSrc = {};
+            s.sources.forEach(function(src) {
+                if (!seenSrc[src]) {
+                    seenSrc[src] = true;
+                    uniqueSources.push(src);
+                }
+            });
+            sourceLabels = uniqueSources.join(', ');
         } else if (s.source) {
             sourceLabels = s.source;
         } else {
@@ -195,7 +203,9 @@ async function computeStrongest() {
                 } else {
                     var existing = allStocks.find(function(x) { return x.code === key; });
                     if (existing) {
-                        existing.sources.push(m);
+                        if (existing.sources.indexOf(m) === -1) {
+                            existing.sources.push(m);
+                        }
                         if (m !== 'deepseek') existing.weight = 1.0;
                     }
                 }

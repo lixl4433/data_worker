@@ -21,7 +21,14 @@ def save_score_board_to_db(date_key: str, stocks: list):
         for s in stocks:
             sources_str = ""
             if s.get("sources") and isinstance(s["sources"], list):
-                sources_str = ",".join(s["sources"])
+                # 去重并保留顺序
+                seen = set()
+                unique_sources = []
+                for src in s["sources"]:
+                    if src not in seen:
+                        seen.add(src)
+                        unique_sources.append(src)
+                sources_str = ",".join(unique_sources)
             cursor.execute("""
                 INSERT OR REPLACE INTO score_board 
                 (date_key, code, name, sector, reason, score, total_score, avg_pct_5d, vol_ratio,

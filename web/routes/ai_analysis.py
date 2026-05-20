@@ -279,7 +279,15 @@ async def api_ai_score_batch(request: Request):
         for s in stocks:
             code = s.get("code", "")
             if code:
-                sources_map[code] = s.get("sources", [s.get("source", "")])
+                raw_sources = s.get("sources", [s.get("source", "")])
+                # 去重并保留顺序
+                seen = set()
+                unique_sources = []
+                for src in raw_sources:
+                    if src not in seen:
+                        seen.add(src)
+                        unique_sources.append(src)
+                sources_map[code] = unique_sources
                 weight_map[code] = s.get("weight", 1.0)
 
         for s in scored:
