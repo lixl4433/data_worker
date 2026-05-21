@@ -12,7 +12,8 @@ from .config import logger
 def get_trade_dates(start: str, end: str) -> List[str]:
     """获取交易日历"""
     import tushare as ts
-    pro = ts.pro_api()
+    from config import TUSHARE_TOKEN
+    pro = ts.pro_api(token=TUSHARE_TOKEN)
     try:
         cal = pro.trade_cal(start_date=start, end_date=end)
         trade_dates = sorted(cal[cal['is_open'] == 1]['cal_date'].tolist())
@@ -51,7 +52,8 @@ def fetch_by_trade_date(trade_date: str) -> Optional[pd.DataFrame]:
     """
     import time
     import tushare as ts
-    pro = ts.pro_api()
+    from config import TUSHARE_TOKEN
+    pro = ts.pro_api(token=TUSHARE_TOKEN)
 
     try:
         df = pro.daily(trade_date=trade_date)

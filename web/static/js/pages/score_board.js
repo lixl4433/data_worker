@@ -1,15 +1,10 @@
 // ====== 综合评分排行榜页面 ======
-var SCORE_PAGE_SIZE = 20;
-var scorePage = 1;
 var _scoreData = [];
 var _currentDateKey = '';
 
 function renderScoreResult() {
     var data = _scoreData;
-    var totalPages = Math.max(1, Math.ceil(data.length / SCORE_PAGE_SIZE));
-    var start = (scorePage - 1) * SCORE_PAGE_SIZE;
-    var end = Math.min(start + SCORE_PAGE_SIZE, data.length);
-    var pageData = data.slice(start, end);
+    var pageData = data;
 
     var tbody = $('scoreResultTbody');
     var html = '';
@@ -92,33 +87,6 @@ function renderScoreResult() {
             '</tr>';
     });
     tbody.innerHTML = html;
-
-    var pagEl = $('scoreResultPagination');
-    if (totalPages <= 1) {
-        pagEl.innerHTML = '';
-        return;
-    }
-    var ph = '<button onclick="scoreGoPage(' + (scorePage - 1) + ')" ' + (scorePage <= 1 ? 'disabled' : '') + '>\u25c0</button>';
-    for (var i = 1; i <= totalPages; i++) {
-        if (i === scorePage) {
-            ph += '<button class="active">' + i + '</button>';
-        } else if (i === 1 || i === totalPages || Math.abs(i - scorePage) <= 2) {
-            ph += '<button onclick="scoreGoPage(' + i + ')">' + i + '</button>';
-        } else if (Math.abs(i - scorePage) === 3) {
-            ph += '<button disabled>...</button>';
-        }
-    }
-    ph += '<button onclick="scoreGoPage(' + (scorePage + 1) + ')" ' + (scorePage >= totalPages ? 'disabled' : '') + '>\u25b6</button>';
-    ph += '<span class="page-info">' + scorePage + '/' + totalPages + '</span>';
-    pagEl.innerHTML = ph;
-}
-
-function scoreGoPage(page) {
-    var data = _scoreData;
-    var totalPages = Math.max(1, Math.ceil(data.length / SCORE_PAGE_SIZE));
-    if (page < 1 || page > totalPages) return;
-    scorePage = page;
-    renderScoreResult();
 }
 
 async function loadScoreDates() {
@@ -143,7 +111,6 @@ async function switchScoreDate() {
     var dateKey = sel.value;
     if (!dateKey) return;
     _currentDateKey = dateKey;
-    scorePage = 1;
     var data = await api('/api/score-board/load?date_key=' + encodeURIComponent(dateKey));
     if (data && data.code === 0) {
         _scoreData = data.data || [];
@@ -228,7 +195,6 @@ async function computeStrongest() {
 
     if (result && result.code === 0) {
         _scoreData = result.data;
-        scorePage = 1;
         _currentDateKey = '';
         $('scoreSourceLabel').textContent = '综合评分';
         $('scoreTotalCount').textContent = result.data.length;
@@ -304,7 +270,6 @@ document.addEventListener('mouseout', function(e) {
     if (data && data.code === 0 && data.data && data.data.length > 0) {
         _scoreData = data.data;
         _currentDateKey = data.date_key || '';
-        scorePage = 1;
         $('scoreSourceLabel').textContent = '综合评分';
         $('scoreTotalCount').textContent = data.data.length;
         renderScoreResult();

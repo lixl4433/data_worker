@@ -110,7 +110,8 @@ def _tushare_get_stock_list() -> pd.DataFrame:
     """通过 TuShare Pro 获取 A 股股票列表"""
     try:
         import tushare as ts
-        pro = ts.pro_api()
+        from config import TUSHARE_TOKEN
+        pro = ts.pro_api(token=TUSHARE_TOKEN)
         df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,name')
         if df is not None and not df.empty:
             result = df.rename(columns={"ts_code": "code", "name": "name"})
