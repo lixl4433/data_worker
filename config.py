@@ -31,7 +31,7 @@ DB_PATH = DATA_DIR / "quant_storage.db"
 # ============================================================
 
 # DeepSeek
-DEEPSEEK_API_KEY = "sk-4f6c76610d64480c887b76c0f2601bab"
+DEEPSEEK_API_KEY = "sk-d42dc2f9174d4ac7b2fe8b69a53b7e6b"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 # Kimi（月之暗面）

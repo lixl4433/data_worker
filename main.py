@@ -203,6 +203,7 @@ from web.routes.wx_push import router as wx_push_router
 from web.routes.longhu import router as longhu_router
 from web.routes.prompts import router as prompts_router
 from web.routes.status import router as status_router
+from web.routes.backtest import router as backtest_router
 
 app.include_router(data_update_router)
 app.include_router(ai_analysis_router)
@@ -213,6 +214,7 @@ app.include_router(wx_push_router)
 app.include_router(longhu_router)
 app.include_router(prompts_router)
 app.include_router(status_router)
+app.include_router(backtest_router)
 
 
 # ---------------------------------------------------------------------------

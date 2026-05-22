@@ -1,51 +1,123 @@
 {% extends "layout.html" %}
 {% block title %}实盘记录 - 量化选股系统{% endblock %}
-{% block head %}{% endblock %}
+{% block head %}
+<style>
+.trade-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center; }
+.trade-modal-content { background:#fff; padding:20px; border-radius:8px; min-width:400px; max-width:500px; max-height:80vh; overflow-y:auto; }
+.trade-modal-content h3 { margin:0 0 12px 0; font-size:14px; }
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; }
+.form-grid input, .form-grid select { width:100%; padding:4px 6px; border:1px solid #d0d5dd; border-radius:4px; font-size:12px; }
+.form-full { margin-top:8px; font-size:12px; }
+.form-full textarea { width:100%; padding:4px 6px; border:1px solid #d0d5dd; border-radius:4px; font-size:12px; }
+.import-table { width:100%; font-size:12px; border-collapse:collapse; }
+.import-table th { background:#f1f5f9; padding:6px 4px; text-align:left; font-size:11px; }
+.import-table td { padding:4px; border-bottom:1px solid #f0f0f0; }
+.import-shares-input { width:60px; padding:2px 4px; font-size:11px; border:1px solid #d0d5dd; border-radius:3px; }
+.stat-card { display:flex; gap:12px; flex-wrap:wrap; padding:12px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; font-size:13px; }
+.stat-item { min-width:80px; }
+.stat-label { color:var(--text-secondary); font-size:11px; }
+.stat-value { font-size:22px; font-weight:700; }
+.stat-value.green { color:#2ecc71; }
+.stat-value.red { color:#e74c3c; }
+.stat-value.orange { color:#f39c12; }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="card">
     <div class="card-title">
         <span>📈 实盘交易记录</span>
-        <span class="sub">AI 选股 TOP 10 → 记录买入价 → 3 天后结算 → 统计胜率</span>
+        <span class="sub">记录每一笔真实交易 → 追踪胜率 → 分析策略效果</span>
     </div>
+
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-        <button class="btn btn-success btn-sm" onclick="createTradeBatch()">📝 创建新批次（TOP 10）</button>
-        <button class="btn btn-primary btn-sm" onclick="loadTradeStats()">📊 查看统计</button>
-        <span id="tradeStatus" style="font-size:12px;color:var(--text-secondary);align-self:center;"></span>
+        <button class="btn btn-success btn-sm" onclick="showImport()">📥 从评分导入</button>
+        <button class="btn btn-primary btn-sm" onclick="showAddModal()">➕ 手动录入</button>
+        <button class="btn btn-info btn-sm" onclick="toggleStats()">📊 统计</button>
+        <span style="font-size:12px;color:var(--text-secondary);align-self:center;">
+            🟢 持仓: <strong id="hc">0</strong>
+            &nbsp;|&nbsp; ✅ 已平仓: <strong id="cc">0</strong>
+        </span>
     </div>
-    <div id="tradeStatsArea" style="display:none; margin-bottom:12px;">
-        <div style="display:flex; gap:16px; flex-wrap:wrap; padding:12px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px;">
-            <div><span style="color:var(--text-secondary);font-size:12px;">总交易</span><br><strong style="font-size:20px;" id="tsTotal">0</strong></div>
-            <div><span style="color:var(--text-secondary);font-size:12px;">胜</span><br><strong style="font-size:20px;color:var(--green);" id="tsWins">0</strong></div>
-            <div><span style="color:var(--text-secondary);font-size:12px;">负</span><br><strong style="font-size:20px;color:var(--red);" id="tsLosses">0</strong></div>
-            <div><span style="color:var(--text-secondary);font-size:12px;">胜率</span><br><strong style="font-size:20px;color:var(--orange);" id="tsWinRate">0%</strong></div>
-            <div><span style="color:var(--text-secondary);font-size:12px;">平均收益</span><br><strong style="font-size:20px;" id="tsAvgRet">0%</strong></div>
-            <div><span style="color:var(--text-secondary);font-size:12px;">批次</span><br><strong style="font-size:20px;" id="tsBatches">0</strong></div>
-        </div>
-    </div>
-    <div id="tradeBatchesArea" style="display:none;">
-        <div class="result-table-wrap">
-            <table>
-                <thead><tr><th>批次</th><th>买入日</th><th>卖出日</th><th>股票数</th><th>胜</th><th>负</th><th>胜率</th><th>均收益</th><th>状态</th><th>操作</th></tr></thead>
-                <tbody id="tradeBatchTbody"></tbody>
-            </table>
-        </div>
-    </div>
-    <div id="tradeDetailArea" style="display:none; margin-top:10px;">
+
+    <!-- 统计 -->
+    <div id="statsPanel" style="display:none; margin-bottom:12px;"></div>
+
+    <!-- 导入面板 -->
+    <div id="importPanel" style="display:none; margin-bottom:12px; padding:12px; background:#f8fafc; border:1px solid #d0d5dd; border-radius:6px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <strong id="tradeDetailTitle" style="font-size:14px;"></strong>
-            <button class="btn btn-warning btn-sm" onclick="settleBatch()" id="btnSettle">💰 结算该批次</button>
+            <strong style="font-size:13px;">📥 从综合评分导入</strong>
+            <button class="btn btn-ghost btn-sm" onclick="hide('importPanel')">✕</button>
         </div>
-        <div class="result-table-wrap">
-            <table>
-                <thead><tr><th>#</th><th>代码</th><th>名称</th><th>评分</th><th>买入价</th><th>股数</th><th>卖出价</th><th>收益</th><th>状态</th><th>操作</th></tr></thead>
-                <tbody id="tradeRecordTbody"></tbody>
-            </table>
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+            <span style="font-size:12px;">勾选要买入的股票</span>
+            <input type="date" id="importDate" style="font-size:11px; padding:2px 6px;">
+            <button class="btn btn-primary btn-sm" id="btnImport" onclick="doImport()">📥 导入</button>
+        </div>
+        <div id="importList" style="max-height:300px; overflow-y:auto;"></div>
+    </div>
+
+    <!-- 交易列表 -->
+    <div class="result-table-wrap" style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th><th>代码</th><th>名称</th><th>策略</th><th>评分</th>
+                    <th>买入日</th><th>买入价</th><th>股数</th>
+                    <th>止损</th><th>止盈</th>
+                    <th>卖出日</th><th>卖出价</th><th>收益</th><th>净收益</th><th>持有</th>
+                    <th>状态</th><th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 添加弹窗 -->
+<div class="trade-modal" id="addModal">
+    <div class="trade-modal-content">
+        <h3 id="addModalTitle">手动录入交易</h3>
+        <div class="form-grid">
+            <div>代码 <input type="text" id="f_code" placeholder="600519"></div>
+            <div>名称 <input type="text" id="f_name" placeholder="贵州茅台"></div>
+            <div>行业 <input type="text" id="f_sector"></div>
+            <div>策略 <select id="f_strategy"><option value="">-</option><option value="A">A 突破型</option><option value="B">B 埋伏型</option></select></div>
+            <div>买入价 <input type="number" id="f_buy" step="0.01"></div>
+            <div>股数 <input type="number" id="f_shares"></div>
+            <div>买入日期 <input type="date" id="f_entry"></div>
+            <div>评分 <input type="number" id="f_score" step="0.1"></div>
+            <div>止损价 <input type="number" id="f_stop" step="0.01"></div>
+            <div>止盈价 <input type="number" id="f_take" step="0.01"></div>
+            <div>推荐持有 <input type="number" id="f_hold" value="5"></div>
+            <div>遵守系统 <select id="f_follow"><option value="1">是</option><option value="0">否</option></select></div>
+        </div>
+        <div class="form-full">备注 <textarea id="f_note" rows="2"></textarea></div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+            <button class="btn btn-ghost" onclick="hide('addModal')">取消</button>
+            <button class="btn btn-primary" id="btnSave" onclick="saveTrade()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 平仓弹窗 -->
+<div class="trade-modal" id="closeModal">
+    <div class="trade-modal-content" style="min-width:350px;">
+        <h3>💰 平仓</h3>
+        <div id="closeInfo" style="font-size:12px; margin-bottom:8px;"></div>
+        <div class="form-grid">
+            <div>卖出价 <input type="number" id="f_sell" step="0.01"></div>
+            <div>卖出日期 <input type="date" id="f_exit"></div>
+            <div>手续费 <input type="number" id="f_fees" step="0.01" value="0"></div>
+        </div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+            <button class="btn btn-ghost" onclick="hide('closeModal')">取消</button>
+            <button class="btn btn-success" onclick="doClose()">确认平仓</button>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/pages/trade_records.js"></script>
+<script src="/static/js/pages/trade_records.js?v=3"></script>
 {% endblock %}

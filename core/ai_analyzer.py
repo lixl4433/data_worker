@@ -512,16 +512,293 @@ def merge_results(deepseek_stocks: Optional[list], kimi_stocks: Optional[list] =
     return result
 
 
+def _assess_market_state(latest_date: str, cursor) -> dict:
+    """
+    多因子市场状态判定（5因子综合评分）
+
+    评分因子和范围：
+      趋势位置 0~30: 上证指数相对于 MA20/MA60 的位置和 MA20 方向
+      市场宽度 0~25: 上涨家数占比
+      量能配合 0~20: 上证成交量相对 20 日均量的比值
+      赚钱效应 -5~15: 涨停家数 - 跌停家数
+      趋势质量 0~10: 连续站上/跌破 MA20 的天数
+
+    总分 0~100: >=65 多头, 35~65 震荡, <35 空头
+    """
+    result = {
+        "state": "震荡",
+        "score": 50,
+        "factors": {},
+        "summary": "",
+        "idx_close": 0,
+    }
+
+    try:
+        dt = datetime.strptime(latest_date, "%Y%m%d")
+
+        # ---- Factor 1: 指数趋势位置 (0~30) ----
+        cursor.execute("""
+            SELECT trade_date, close FROM market_snapshot
+            WHERE code = '000001' AND trade_date <= ?
+            ORDER BY trade_date DESC LIMIT 60
+        """, (latest_date,))
+        idx_rows = cursor.fetchall()
+
+        f1 = 15
+        idx_close = 0
+
+        if len(idx_rows) >= 20:
+            closes = [r["close"] for r in idx_rows if r["close"] is not None]
+            if len(closes) >= 20:
+                idx_close = closes[0]
+                ma20 = sum(closes[:20]) / 20
+                ma60 = sum(closes[:min(60, len(closes))]) / min(60, len(closes))
+
+                above_ma20 = idx_close >= ma20
+                above_ma60 = idx_close >= ma60
+
+                # MA20 方向：对比前 20 日和最近 20 日的 MA20
+                if len(closes) >= 40:
+                    ma20_recent = sum(closes[:20]) / 20
+                    ma20_prior = sum(closes[20:40]) / 20
+                    ma20_rising = ma20_recent > ma20_prior * 1.003
+                    ma20_falling = ma20_recent < ma20_prior * 0.997
+                else:
+                    ma20_rising = True
+                    ma20_falling = False
+
+                if above_ma20 and ma20_rising and above_ma60:
+                    f1 = 30
+                elif above_ma20 and ma20_rising:
+                    f1 = 25
+                elif above_ma20 and not ma20_falling:
+                    f1 = 20
+                elif above_ma20 and ma20_falling:
+                    f1 = 15
+                elif not above_ma20 and not ma20_falling:
+                    f1 = 10
+                elif not above_ma20 and ma20_falling and above_ma60:
+                    f1 = 5
+                else:
+                    f1 = 0
+
+        result["factors"]["趋势位置"] = f1
+        result["idx_close"] = idx_close
+
+        # ---- Factor 2: 市场宽度 (0~25) ----
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN pct_chg > 0 THEN 1 ELSE 0 END) as advances
+            FROM market_snapshot
+            WHERE trade_date = ? AND LENGTH(code) = 6
+              AND code NOT LIKE '399%' AND code NOT LIKE '000%'
+        """, (latest_date,))
+        br = cursor.fetchone()
+        total = br["total"] or 0
+        advances = br["advances"] or 0
+
+        if total > 0:
+            ratio = advances / total
+            if ratio >= 0.70:
+                f2 = 25
+            elif ratio >= 0.60:
+                f2 = 20
+            elif ratio >= 0.50:
+                f2 = 15
+            elif ratio >= 0.40:
+                f2 = 10
+            elif ratio >= 0.30:
+                f2 = 5
+            else:
+                f2 = 0
+        else:
+            f2 = 12
+
+        result["factors"]["市场宽度"] = f2
+
+        # ---- Factor 3: 量能配合 (0~20) ----
+        cursor.execute("""
+            SELECT volume FROM market_snapshot
+            WHERE code = '000001' AND trade_date = ?
+        """, (latest_date,))
+        vrow = cursor.fetchone()
+
+        if vrow and vrow["volume"] and vrow["volume"] > 0:
+            cur_vol = vrow["volume"]
+            thirty_days_ago = (dt - timedelta(days=35)).strftime("%Y%m%d")
+            cursor.execute("""
+                SELECT AVG(volume) as avg_vol FROM market_snapshot
+                WHERE code = '000001' AND trade_date < ? AND trade_date >= ?
+            """, (latest_date, thirty_days_ago))
+            arow = cursor.fetchone()
+            avg_vol = arow["avg_vol"] if arow and arow["avg_vol"] else cur_vol
+
+            if avg_vol > 0:
+                vr = cur_vol / avg_vol
+                if vr >= 1.5:
+                    f3 = 20
+                elif vr >= 1.2:
+                    f3 = 18
+                elif vr >= 1.0:
+                    f3 = 14
+                elif vr >= 0.8:
+                    f3 = 10
+                elif vr >= 0.6:
+                    f3 = 5
+                else:
+                    f3 = 0
+            else:
+                f3 = 10
+        else:
+            f3 = 10
+
+        result["factors"]["量能"] = f3
+
+        # ---- Factor 4: 赚钱效应 (-5~15) ----
+        cursor.execute("""
+            SELECT
+                SUM(CASE WHEN pct_chg >= 9.8 THEN 1 ELSE 0 END) as limit_up,
+                SUM(CASE WHEN pct_chg <= -9.8 THEN 1 ELSE 0 END) as limit_down
+            FROM market_snapshot
+            WHERE trade_date = ? AND LENGTH(code) = 6
+              AND code NOT LIKE '399%' AND code NOT LIKE '000%'
+              AND name NOT LIKE '%ST%' AND name NOT LIKE '%退%'
+        """, (latest_date,))
+        lr = cursor.fetchone()
+        limit_up = lr["limit_up"] or 0
+        limit_down = lr["limit_down"] or 0
+
+        net_limit = limit_up - limit_down
+
+        if net_limit >= 30:
+            f4 = 15
+        elif net_limit >= 15:
+            f4 = 12
+        elif net_limit >= 5:
+            f4 = 8
+        elif net_limit >= 0:
+            f4 = 4
+        elif net_limit >= -10:
+            f4 = 0
+        else:
+            f4 = -5
+
+        result["factors"]["赚钱效应"] = f4
+
+        # ---- Factor 5: 趋势质量 (0~10) ----
+        f5 = 5
+
+        if len(idx_rows) >= 20:
+            closes = [r["close"] for r in idx_rows if r["close"] is not None]
+            if len(closes) >= 20:
+                ma20_val = sum(closes[:20]) / 20
+                cursor.execute("""
+                    SELECT close FROM market_snapshot
+                    WHERE code = '000001' AND trade_date <= ?
+                    ORDER BY trade_date DESC LIMIT 8
+                """, (latest_date,))
+                recent_closes = [r["close"] for r in cursor.fetchall() if r["close"] is not None]
+
+                above_count = sum(1 for c in recent_closes if c >= ma20_val)
+                below_count = len(recent_closes) - above_count
+
+                if above_count >= 6:
+                    f5 = 10
+                elif above_count >= 4:
+                    f5 = 8
+                elif above_count >= 2:
+                    f5 = 6
+                elif below_count >= 6:
+                    f5 = 1
+                elif below_count >= 4:
+                    f5 = 2
+                else:
+                    f5 = 4
+
+        result["factors"]["趋势质量"] = f5
+
+        # ---- 综合 ----
+        total = f1 + f2 + f3 + f4 + f5
+        total = max(0, min(100, total))
+
+        if total >= 65:
+            result["state"] = "bull"
+        elif total >= 35:
+            result["state"] = "震荡"
+        else:
+            result["state"] = "bear"
+
+        result["score"] = total
+
+        detail = ", ".join(f"{k}:{v}" for k, v in result["factors"].items())
+        result["summary"] = f"评分={total}, {detail}"
+
+        return result
+
+    except Exception as e:
+        logger.warning(f"市场状态判定失败，默认震荡: {e}")
+        return result
+
+
+# ---------------------------------------------------------------------------
+# RSI(14) 计算工具函数
+# ---------------------------------------------------------------------------
+def _calc_rsi(closes: list, period: int = 14) -> float:
+    """计算 RSI(14) 指标，返回 0~100"""
+    if not closes or len(closes) < period + 1:
+        return 50.0
+    prices = [c for c in closes if c is not None and c > 0]
+    if len(prices) < period + 1:
+        return 50.0
+
+    # 初始平滑平均
+    gains, losses = 0.0, 0.0
+    for i in range(1, period + 1):
+        diff = prices[i] - prices[i - 1]
+        if diff > 0:
+            gains += diff
+        else:
+            losses -= diff
+    avg_gain = gains / period
+    avg_loss = losses / period
+
+    # Wilder 平滑
+    for i in range(period + 1, len(prices)):
+        diff = prices[i] - prices[i - 1]
+        if diff > 0:
+            avg_gain = (avg_gain * (period - 1) + diff) / period
+            avg_loss = (avg_loss * (period - 1)) / period
+        else:
+            avg_gain = (avg_gain * (period - 1)) / period
+            avg_loss = (avg_loss * (period - 1) - diff) / period
+
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def _rsi_divergence(price_trend: str, rsi_trend: str) -> int:
+    """检测 RSI 背离。返回 1=底背离, -1=顶背离, 0=无背离"""
+    if price_trend == "lower_low" and rsi_trend == "higher_low":
+        return 1   # 底背离：价格新低但 RSI 未新低 → 看涨
+    if price_trend == "higher_high" and rsi_trend == "lower_high":
+        return -1  # 顶背离：价格新高但 RSI 未新高 → 看跌
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # 对 AI 选出的股票进行多因子评分（复用 web/main.py 中的算法逻辑）
 # ---------------------------------------------------------------------------
-def score_ai_stocks(ai_stocks: list) -> list:
+def score_ai_stocks(ai_stocks: list, trade_date: str = "") -> list:
     """
     对 AI 模型选出的股票，从 market_snapshot 中读取 K 线数据，
     使用多因子算法（涨幅+振幅+量比+位置评分）进行算分排名。
 
     Args:
         ai_stocks: AI 模型选出的股票列表，每项含 code, name, sector, reason
+        trade_date: 目标交易日 YYYYMMDD（留空则用最新交易日）
 
     Returns:
         list: 评分后的股票列表，每项含 code, name, sector, reason, score 等
@@ -545,9 +822,12 @@ def score_ai_stocks(ai_stocks: list) -> list:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 获取最新交易日
-    cursor.execute("SELECT MAX(trade_date) FROM market_snapshot")
-    latest_date = cursor.fetchone()[0]
+    # 获取目标交易日
+    if trade_date:
+        latest_date = trade_date
+    else:
+        cursor.execute("SELECT MAX(trade_date) FROM market_snapshot")
+        latest_date = cursor.fetchone()[0]
     if not latest_date:
         conn.close()
         logger.warning("market_snapshot 中无数据，无法评分")
@@ -678,42 +958,37 @@ def score_ai_stocks(ai_stocks: list) -> list:
         ),
         -- RSI(14) 计算 + 背离检测
         stock_rsi AS (
-            SELECT
-                code,
-                -- 近14天收盘价序列（用于 RSI 计算）
-                (SELECT GROUP_CONCAT(close, ',') FROM (
-                    SELECT close FROM market_snapshot s2
-                    WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?
-                    ORDER BY s2.trade_date ASC
-                )) AS close_list,
-                -- 近14天最低价（用于底背离检测）
-                (SELECT MIN(low) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_low_14d,
-                -- 近14天最高价（用于顶背离检测）
-                (SELECT MAX(high) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_high_14d,
-                -- 近14天最低收盘价（用于底背离检测）
-                (SELECT MIN(close) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_close_low_14d,
-                -- 近14天最高收盘价（用于顶背离检测）
-                (SELECT MAX(close) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_close_high_14d,
-                -- 近14天前7天的最低收盘价（用于比较前后半段）
-                (SELECT MIN(close) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_close_low_first7,
-                -- 近14天后7天的最低收盘价
-                (SELECT MIN(close) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_close_low_last7,
-                -- 近14天前7天的最高收盘价
-                (SELECT MAX(close) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_close_high_first7,
-                -- 近14天后7天的最高收盘价
-                (SELECT MAX(close) FROM market_snapshot s2
-                 WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?) AS rsi_close_high_last7
+            SELECT code,
+                   (SELECT GROUP_CONCAT(close, ',') FROM (
+                       SELECT close FROM market_snapshot s2
+                       WHERE s2.code = rsi_sub.code AND s2.trade_date >= ? AND s2.trade_date <= ?
+                       ORDER BY s2.trade_date ASC
+                   )) AS close_list
             FROM market_snapshot rsi_sub
             WHERE rsi_sub.code IN ({placeholders})
             GROUP BY rsi_sub.code
-            HAVING COUNT(*) >= 14
+            HAVING COUNT(*) >= 15
+        ),
+        -- 近10日趋势
+        stock_stats_10d AS (
+            SELECT code,
+                   AVG(pct_chg) AS avg_pct_10d,
+                   SUM(CASE WHEN pct_chg > 0 THEN 1 ELSE 0 END) AS up_days_10d
+            FROM market_snapshot
+            WHERE trade_date >= ? AND trade_date <= ?
+              AND code IN ({placeholders})
+            GROUP BY code
+            HAVING COUNT(*) >= 3
+        ),
+        -- 近20日趋势
+        stock_stats_20d AS (
+            SELECT code,
+                   AVG(pct_chg) AS avg_pct_20d
+            FROM market_snapshot
+            WHERE trade_date >= ? AND trade_date <= ?
+              AND code IN ({placeholders})
+            GROUP BY code
+            HAVING COUNT(*) >= 5
         )
         SELECT
             s.code, s.name,
@@ -723,21 +998,17 @@ def score_ai_stocks(ai_stocks: list) -> list:
             ROUND(s.latest_close, 2) AS latest_close,
             ROUND(s.avg_turnover_5d, 2) AS turnover_rate,
             ROUND(s.avg_amount_5d, 2) AS amount,
-            -- RSI 背离状态：-1=顶背离(危险), 0=无背离, 1=底背离(机会)
-            CASE
-                WHEN rsi.rsi_close_low_last7 < rsi.rsi_close_low_first7
-                 AND rsi.rsi_close_low_last7 <= rsi.rsi_low_14d * 1.01
-                THEN 1
-                WHEN rsi.rsi_close_high_last7 > rsi.rsi_close_high_first7
-                 AND rsi.rsi_close_high_last7 >= rsi.rsi_high_14d * 0.99
-                THEN -1
-                ELSE 0
-            END AS rsi_divergence,
+            -- RSI 计算用收盘价序列（Python 层计算真实 RSI）
+            rsi.close_list,
             d5.pct_std_5d,
             d5.up_days_5d,
             d5.max_drawdown_5d,
             d5.min_low_5d,
             d5.max_high_5d,
+            -- 多周期趋势数据
+            s10.avg_pct_10d,
+            s10.up_days_10d,
+            s20.avg_pct_20d,
             -- 箱体位置：0~1，越接近0越靠近箱体底，越接近1越靠近箱体顶
             ROUND((s.latest_close - bx.box_low) / NULLIF(bx.box_high - bx.box_low, 0), 4) AS box_position,
             -- 距5日高点百分比：0~1，越接近1越靠近5日高点
@@ -785,13 +1056,12 @@ def score_ai_stocks(ai_stocks: list) -> list:
                 END
             , 2) AS stop_loss,
             -- 原始因子原始值（Python 层做动态权重评分）
-            -- 因子1原始分：趋势强度
+            -- 因子1原始分：5日趋势基础分（0-15），多周期加分在 Python 层
             ROUND(
                 CASE
-                    WHEN COALESCE(s.avg_pct_5d, 0) > 0 AND COALESCE(d5.up_days_5d, 0) >= 3 THEN 25
-                    WHEN COALESCE(s.avg_pct_5d, 0) > 0 AND COALESCE(d5.up_days_5d, 0) >= 2 THEN 18
-                    WHEN COALESCE(s.avg_pct_5d, 0) > 0 AND COALESCE(d5.up_days_5d, 0) >= 1 THEN 10
-                    WHEN COALESCE(s.avg_pct_5d, 0) <= 0 AND COALESCE(d5.up_days_5d, 0) >= 2 THEN 5
+                    WHEN COALESCE(s.avg_pct_5d, 0) > 0 AND COALESCE(d5.up_days_5d, 0) >= 3 THEN 15
+                    WHEN COALESCE(s.avg_pct_5d, 0) > 0 AND COALESCE(d5.up_days_5d, 0) >= 2 THEN 10
+                    WHEN COALESCE(s.avg_pct_5d, 0) > 0 AND COALESCE(d5.up_days_5d, 0) >= 1 THEN 5
                     ELSE 0
                 END
             , 2) AS f1_trend,
@@ -806,33 +1076,12 @@ def score_ai_stocks(ai_stocks: list) -> list:
                     ELSE 0
                 END
             , 2) AS f2_vol,
-            -- 因子3原始分：RSI背离
+            -- 因子3原始分：Python 层基于真实 RSI(14) 计算，SQL 返回中性值
+            10 AS f3_rsi,
+            -- 因子4原始分：Python 层基于 Sharpe 比计算，SQL 返回基础值
             ROUND(
                 CASE
-                    WHEN rsi.rsi_close_low_last7 < rsi.rsi_close_low_first7
-                     AND rsi.rsi_close_low_last7 <= rsi.rsi_low_14d * 1.01
-                    THEN 20
-                    WHEN rsi.rsi_close_high_last7 > rsi.rsi_close_high_first7
-                     AND rsi.rsi_close_high_last7 >= rsi.rsi_high_14d * 0.99
-                    THEN -15
-                    ELSE 10
-                END
-            , 2) AS f3_rsi,
-            -- 因子4原始分：上涨稳定性
-            ROUND(
-                CASE
-                    WHEN COALESCE(s.avg_pct_5d, 0) > 0
-                     AND COALESCE(d5.pct_std_5d, 0) < 3
-                     AND COALESCE(d5.max_drawdown_5d, 0) / NULLIF(s.latest_close, 0) < 0.05
-                    THEN 15
-                    WHEN COALESCE(s.avg_pct_5d, 0) > 0
-                     AND COALESCE(d5.pct_std_5d, 0) < 5
-                     AND COALESCE(d5.max_drawdown_5d, 0) / NULLIF(s.latest_close, 0) < 0.08
-                    THEN 10
                     WHEN COALESCE(s.avg_pct_5d, 0) > 0 THEN 5
-                    WHEN COALESCE(s.avg_pct_5d, 0) < 0
-                     AND COALESCE(d5.pct_std_5d, 0) > 5
-                    THEN -8
                     ELSE 0
                 END
             , 2) AS f4_stability,
@@ -873,6 +1122,8 @@ def score_ai_stocks(ai_stocks: list) -> list:
         LEFT JOIN stock_ma20_atr ma ON s.code = ma.code
         LEFT JOIN stock_ma60 ma60 ON s.code = ma60.code
         LEFT JOIN stock_rsi rsi ON s.code = rsi.code
+        LEFT JOIN stock_stats_10d s10 ON s.code = s10.code
+        LEFT JOIN stock_stats_20d s20 ON s.code = s20.code
         WHERE 1=1
             -- 风险控制：过滤 ST、退市、风险警示股
             AND s.name NOT LIKE '%ST%'
@@ -895,10 +1146,10 @@ def score_ai_stocks(ai_stocks: list) -> list:
     date_ma20 = (latest_dt - timedelta(days=30)).strftime("%Y%m%d")
     date_ma60 = (latest_dt - timedelta(days=90)).strftime("%Y%m%d")
 
-    # RSI 子查询的日期范围
+    # RSI + 多周期趋势 子查询的日期范围
     date_rsi_start = (latest_dt - timedelta(days=30)).strftime("%Y%m%d")
     date_rsi_end = latest_date
-    date_rsi_mid = (latest_dt - timedelta(days=15)).strftime("%Y%m%d")  # 前后半段分界
+    date_10d_start = (latest_dt - timedelta(days=15)).strftime("%Y%m%d")
 
     params = (
         latest_date,           # 最新收盘价
@@ -926,61 +1177,26 @@ def score_ai_stocks(ai_stocks: list) -> list:
         # stock_ma60 参数
         date_ma60, latest_date,
         *codes,
-        # stock_rsi 参数（close_list, rsi_low_14d, rsi_high_14d, rsi_close_low_14d, rsi_close_high_14d, 前后半段）
+        # stock_rsi 参数（close_list）
         date_rsi_start, date_rsi_end,  # close_list
-        date_rsi_start, date_rsi_end,  # rsi_low_14d
-        date_rsi_start, date_rsi_end,  # rsi_high_14d
-        date_rsi_start, date_rsi_end,  # rsi_close_low_14d
-        date_rsi_start, date_rsi_end,  # rsi_close_high_14d
-        date_rsi_start, date_rsi_mid,  # rsi_close_low_first7 (前半段)
-        date_rsi_mid, date_rsi_end,    # rsi_close_low_last7 (后半段)
-        date_rsi_start, date_rsi_mid,  # rsi_close_high_first7 (前半段)
-        date_rsi_mid, date_rsi_end,    # rsi_close_high_last7 (后半段)
         *codes,                        # stock_rsi 的 WHERE code IN
+        # stock_stats_10d 参数
+        date_10d_start, latest_date,
+        *codes,
+        # stock_stats_20d 参数（复用 date_20 = 30天前）
+        date_20, latest_date,
+        *codes,
     )
 
     # ============================================================
-    # 第一步：市场环境判定（大盘状态 + 缓冲区 + 赚钱效应）
-    # 查上证指数（000001）的最新收盘价和 MA20
+    # 第一步：市场环境判定（多因子综合评分）
+    # 5 因子：趋势位置(0~30) + 市场宽度(0~25) + 量能(0~20) + 赚钱效应(-5~15) + 趋势质量(0~10)
+    # 总分 0~100：>=65 多头, 35~65 震荡, <35 空头
     # ============================================================
-    market_status = "bull"  # bull=多头, bear=空头/震荡
-    try:
-        cursor.execute("""
-            SELECT close FROM market_snapshot
-            WHERE code = '000001' AND trade_date <= ?
-            ORDER BY trade_date DESC LIMIT 20
-        """, (latest_date,))
-        rows = [r[0] for r in cursor.fetchall() if r[0] is not None]
-        if len(rows) >= 5:
-            latest_idx = rows[0]
-            # 缓冲区：需要连续 2 天站上 MA20 才判定为多头
-            # 取最近 2 天的收盘价
-            close_today = rows[0]
-            close_yesterday = rows[1] if len(rows) > 1 else rows[0]
-            ma20_idx = sum(rows[:20]) / min(len(rows), 20)
-            
-            # 条件1：今日收盘价站上 MA20 的 0.5% 以上（缓冲区）
-            above_ma20_today = close_today >= ma20_idx * 1.005
-            above_ma20_yesterday = close_yesterday >= ma20_idx * 1.005
-            
-            # 条件2：赚钱效应（涨停家数 > 30 家）
-            # 统计当日涨幅 > 9.8% 的股票数量作为涨停家数近似值
-            cursor.execute("""
-                SELECT COUNT(*) FROM market_snapshot
-                WHERE trade_date = ? AND pct_chg >= 9.8
-            """, (latest_date,))
-            limit_up_count = cursor.fetchone()[0] or 0
-            
-            if above_ma20_today and above_ma20_yesterday and limit_up_count >= 30:
-                market_status = "bull"
-                logger.info(f"📊 市场判定：多头（上证 {latest_idx} >= MA20×1.005, 涨停{limit_up_count}家）")
-            else:
-                market_status = "bear"
-                logger.info(f"📊 市场判定：空头/震荡（上证 {latest_idx}, MA20={ma20_idx:.2f}, 涨停{limit_up_count}家）")
-        else:
-            logger.warning("上证指数数据不足，默认多头市场")
-    except Exception as e:
-        logger.warning(f"市场环境判定失败，默认多头: {e}")
+    market_assessment = _assess_market_state(latest_date, cursor)
+    market_status = market_assessment["state"]
+    market_score = market_assessment["score"]
+    logger.info(f"📊 市场判定：{market_status}（评分 {market_score}/100）- {market_assessment.get('summary', '')}")
 
     cursor.execute(sql, params)
     scored_rows = {row["code"]: dict(row) for row in cursor.fetchall()}
@@ -1057,65 +1273,190 @@ def score_ai_stocks(ai_stocks: list) -> list:
                         elif net_buy_ratio < 0:
                             lh_bonus = -0.5
 
-            # ---- 个股策略分类 ----
-            # A类（🚀 突破型）：收盘价靠近5日高点（close_to_high > 0.7）或箱体上半部分（box_pos > 0.6）
-            # B类（🛡️ 埋伏型）：收盘价靠近箱体底部（box_pos < 0.3）或RSI底背离
-            # C类（⏸️ 观望型）：中间地带，不进入 TOP 10
+            # ---- 真实 RSI(14) 计算 ----
+            rsi_value = 50.0
+            rsi_div = 0  # 0=无, 1=底背离, -1=顶背离
+            close_list_str = sr.get("close_list", "")
+            if close_list_str:
+                try:
+                    closes = [float(x) for x in close_list_str.split(",") if x]
+                    rsi_value = _calc_rsi(closes, 14)
+                    # RSI 背离检测：比较前半段和后半段的 RSI 趋势 vs 价格趋势
+                    if len(closes) >= 14:
+                        mid = len(closes) // 2
+                        first_half = closes[:mid]
+                        second_half = closes[mid:]
+                        if len(first_half) >= 5 and len(second_half) >= 5:
+                            rsi_first = _calc_rsi(first_half, min(7, len(first_half) - 1))
+                            rsi_second = _calc_rsi(second_half, min(7, len(second_half) - 1))
+                            p_first = sum(first_half) / len(first_half)
+                            p_second = sum(second_half) / len(second_half)
+                            price_trend = "lower_low" if p_second < p_first * 0.98 else "higher_high" if p_second > p_first * 1.02 else "flat"
+                            rsi_trend = "higher_low" if rsi_second > rsi_first + 3 else "lower_high" if rsi_second < rsi_first - 3 else "flat"
+                            rsi_div = _rsi_divergence(price_trend, rsi_trend)
+                except (ValueError, ZeroDivisionError, IndexError):
+                    rsi_value = 50.0
+
+            # ---- 个股策略分类（均值回归模式） ----
+            # A类（突破确认）：仅当价格突破箱体上沿 + 量能配合 + RSI中性偏强
+            # B类（反转埋伏）：价格回调到支撑位附近 + RSI偏低/底背离
+            avg_pct = sr.get("avg_pct_5d")
             is_type_a = False
             is_type_b = False
-            
-            if close_to_high is not None and close_to_high > 0.7:
+
+            # A类条件更苛刻：须靠近箱体顶 + 量能放大 + RSI > 40（不是超买区）
+            if (box_pos is not None and box_pos > 0.75
+                    and sr.get("vol_ratio", 0) or 0 > 1.2
+                    and 40 <= rsi_value <= 65):
                 is_type_a = True
-            if box_pos is not None and box_pos > 0.6:
-                is_type_a = True
-            # 如果 RSI 底背离，强制归为 B 类
-            if sr.get("rsi_divergence") == 1:
+            # B类放宽：箱体底部附近或 RSI 偏低的都算
+            if box_pos is not None and box_pos < 0.35:
+                is_type_b = True
+            if rsi_value < 40:
+                is_type_b = True
+            if avg_pct is not None and avg_pct < -2:
+                is_type_b = True  # 短期超跌也算
+            # RSI底背离 → B类
+            if rsi_div == 1:
                 is_type_a = False
                 is_type_b = True
-            # 箱体底部附近归为 B 类
-            if box_pos is not None and box_pos < 0.3:
-                is_type_b = True
-            
+            # RSI顶背离 → 过滤
+            if rsi_div == -1:
+                continue
+
             if is_type_a:
                 strategy_type = "A"
             elif is_type_b:
                 strategy_type = "B"
             else:
-                # C类（观望型）：中间地带，直接过滤，不进入 TOP 10
                 continue
 
-            # ---- 动态权重分配 ----
+            # ---- 动态权重分配（均值回归 + 三段式：bull/震荡/bear） ----
+            # 反转市下：RSI、箱体位置权重高，趋势/突破权重低
             if market_status == "bull":
-                # 多头市场：追涨为主
                 if strategy_type == "A":
-                    # A类（向上突击型）：突破因子权重高
-                    w1, w2, w3, w4, w5, w6 = 0.20, 0.25, 0.10, 0.10, 0.30, 0.05
+                    w1, w2, w3, w4, w5, w6 = 0.10, 0.15, 0.25, 0.10, 0.15, 0.25
                 else:
-                    # B类（低位埋伏型）：RSI背离+箱体底部权重高
-                    w1, w2, w3, w4, w5, w6 = 0.20, 0.20, 0.25, 0.10, 0.05, 0.20
+                    w1, w2, w3, w4, w5, w6 = 0.05, 0.10, 0.35, 0.10, 0.05, 0.35
+            elif market_status == "震荡":
+                if strategy_type == "A":
+                    w1, w2, w3, w4, w5, w6 = 0.05, 0.15, 0.30, 0.10, 0.10, 0.30
+                else:
+                    w1, w2, w3, w4, w5, w6 = 0.05, 0.10, 0.35, 0.10, 0.05, 0.35
+            else:  # bear
+                if strategy_type == "A":
+                    w1, w2, w3, w4, w5, w6 = 0.05, 0.10, 0.35, 0.15, 0.05, 0.30
+                else:
+                    w1, w2, w3, w4, w5, w6 = 0.05, 0.10, 0.40, 0.10, 0.05, 0.30
+
+            # ---- 因子评分（均值回归方向） ----
+            f6 = sr.get("f6_box_volume", 0) or 0  # 箱体底部放量 → 保留，方向正确
+
+            # f1_reversal: 短期超跌评分（0~20）
+            # 近5日跌越多分越高（均值回归预期）
+            if avg_pct is not None:
+                if avg_pct < -3:
+                    f1 = 20
+                elif avg_pct < -2:
+                    f1 = 16
+                elif avg_pct < -1:
+                    f1 = 12
+                elif avg_pct < 0:
+                    f1 = 8
+                elif avg_pct < 2:
+                    f1 = 4
+                else:
+                    f1 = 0  # 涨太多的不追
             else:
-                # 空头/震荡市场：防守为主
-                if strategy_type == "A":
-                    # A类：量价配合+趋势为主，突破降权
-                    w1, w2, w3, w4, w5, w6 = 0.20, 0.25, 0.15, 0.15, 0.15, 0.10
+                f1 = 0
+
+            # f2_vol_reversal: 缩量回调评分（0~15）
+            # 回调过程中缩量 = 抛压耗尽 = 反弹潜力
+            vol_ratio_val = sr.get("vol_ratio", 1.0) or 1.0
+            if avg_pct is not None and avg_pct < 0 and vol_ratio_val < 0.8:
+                f2 = 15  # 跌 + 缩量 = 最佳
+            elif avg_pct is not None and avg_pct < 0 and vol_ratio_val < 1.0:
+                f2 = 10
+            elif vol_ratio_val < 0.6:
+                f2 = 8  # 极度缩量
+            elif vol_ratio_val > 2.0 and avg_pct is not None and avg_pct > 0:
+                f2 = 3  # 放量上涨 → 追高风险
+            elif vol_ratio_val > 1.5:
+                f2 = 5
+            else:
+                f2 = 6
+
+            # f3_rsi_reversal: 超卖反弹评分（0~25）
+            # RSI越低分越高（但极端低可能继续跌，给中性分）
+            if 25 <= rsi_value <= 40:
+                f3 = 25  # 最佳超卖反弹区
+            elif 40 < rsi_value <= 50:
+                f3 = 18  # 中性偏低
+            elif 15 <= rsi_value < 25:
+                f3 = 14  # 深度超卖
+            elif 50 < rsi_value <= 60:
+                f3 = 10  # 中性
+            elif 60 < rsi_value <= 70:
+                f3 = 6   # 偏强
+            elif rsi_value > 70:
+                f3 = 3   # 超买不参与
+            else:
+                f3 = 10
+
+            # f4_stability: 低波动评分（0~15）
+            # 低波动 → 蓄力充分 → 容易反弹
+            pct_std = sr.get("pct_std_5d")
+            if pct_std and pct_std > 0:
+                if pct_std < 1.0:
+                    f4 = 15
+                elif pct_std < 2.0:
+                    f4 = 10
+                elif pct_std < 3.0:
+                    f4 = 5
                 else:
-                    # B类：RSI背离+箱体底部为主，突破几乎屏蔽
-                    w1, w2, w3, w4, w5, w6 = 0.20, 0.15, 0.25, 0.10, 0.05, 0.25
+                    f4 = 0
+            else:
+                f4 = 5
 
-            # ---- 计算动态评分 ----
-            f1 = sr.get("f1_trend", 0) or 0
-            f2 = sr.get("f2_vol", 0) or 0
-            f3 = sr.get("f3_rsi", 0) or 0
-            f4 = sr.get("f4_stability", 0) or 0
-            f5 = sr.get("f5_breakout", 0) or 0
-            f6 = sr.get("f6_box_volume", 0) or 0
+            # f5_reversal: 价格位置评分（0~10）
+            # 靠近5日低点 = 超跌 = 反弹潜力
+            close_to_high_pct = sr.get("close_to_high_pct")
+            if close_to_high_pct is not None:
+                if close_to_high_pct < 0.2:
+                    f5 = 10  # 靠近5日低点
+                elif close_to_high_pct < 0.4:
+                    f5 = 7
+                elif close_to_high_pct < 0.6:
+                    f5 = 4
+                elif close_to_high_pct > 0.9:
+                    f5 = 1  # 靠近5日高点 → 追高风险
+                else:
+                    f5 = 3
+            else:
+                f5 = 0
 
-            # ---- 龙虎榜机构参与度加分（轻权重） ----
+            # ---- 量价确认（反转版） ----
+            # 缩量下跌 = 抛压衰竭，加分；放量下跌 = 恐慌，中性
+            vol_penalty = 1.0
+            if avg_pct is not None and avg_pct < 0 and vol_ratio_val < 0.7:
+                vol_penalty = 1.15  # 缩量下跌 → 加分
+            elif avg_pct is not None and avg_pct < 0 and vol_ratio_val > 2.0:
+                vol_penalty = 0.85  # 放量下跌 → 还有下跌动能
+
+            # ---- RSI 调整项（反转版） ----
+            rsi_adjustment = 0
+            if rsi_value < 35:
+                rsi_adjustment += 5  # 超卖加分
+            if rsi_value > 70:
+                rsi_adjustment -= 4  # 超买减分
+            if rsi_div == 1:
+                rsi_adjustment += 5  # 底背离大幅加分
+
+            # ---- 龙虎榜（不变） ----
             institution_bonus = 0
             if lh.get("has_longhu"):
                 inst_ratio = lh.get("institution_ratio", 0.0) or 0.0
                 inst_net_buy = lh.get("institution_net_buy", 0.0) or 0.0
-                # 机构参与度 > 30% 且机构净买入 > 0
                 if inst_ratio > 0.3 and inst_net_buy > 0:
                     institution_bonus = 4
                 elif inst_ratio > 0.2 and inst_net_buy > 0:
@@ -1123,69 +1464,53 @@ def score_ai_stocks(ai_stocks: list) -> list:
                 elif inst_ratio > 0.1 and inst_net_buy > 0:
                     institution_bonus = 1
                 elif inst_ratio > 0.3 and inst_net_buy < 0:
-                    institution_bonus = -2  # 机构高参与度但净卖出，危险信号
+                    institution_bonus = -2
 
-            # ---- AI题材热度系数 ----
-            # 被多个模型推荐的股票获得额外加成
+            # ---- AI题材热度系数（不变） ----
             ai_hot_bonus = 0
             if s.get("ai_count", 1) >= 2:
-                ai_hot_bonus = 8  # 被两个模型同时推荐
+                ai_hot_bonus = 8
             elif s.get("ai_count", 1) >= 1:
-                ai_hot_bonus = 3  # 被一个模型推荐
+                ai_hot_bonus = 3
 
             dynamic_score = round(
-                f1 * w1 + f2 * w2 + f3 * w3 + f4 * w4 + f5 * w5 + f6 * w6
-                + lh_bonus + institution_bonus + ai_hot_bonus, 2
+                (f1 * w1 + f2 * w2 + f3 * w3 + f4 * w4 + f5 * w5 + f6 * w6
+                 + lh_bonus + institution_bonus + ai_hot_bonus + rsi_adjustment) * vol_penalty, 2
             )
 
             final_score = dynamic_score
             
             # ============================================================
-            # 关键价位最终校验（Python 层，避免 SQL 列别名限制）
+            # 关键价位 + 操作规则（基于回测优化的止损止盈参数）
+            #
+            # 优化依据：scripts/_optimize_stop_loss.py 模拟验证结果：
+            #   TOP3 原始      : 46.4%胜率, 盈亏比 1.21
+            #   TOP3 止损3%+止盈5%: 46.0%胜率, 盈亏比 1.35（累计收益+47%）
+            #
+            # A型(突破): 止损-3% 止盈+5% 持有≤5天 — 突破失败跑得快
+            # B型(埋伏): 止损-5% 止盈+8% 持有≤5天 — 给底部震荡留空间
             # ============================================================
             close = sr["latest_close"]
-            buy_raw = sr.get("buy_price")
-            sell_raw = sr.get("sell_price")
-            stop_raw = sr.get("stop_loss")
-            avg_atr = sr.get("avg_atr") or close * 0.03  # 如果没有ATR，用3%估算
-            
-            # 最终买入价：如果买入价 > 现价，则取现价*0.99（现价下方1%挂单）
-            if buy_raw is not None:
-                if buy_raw > close:
-                    buy_final = round(close * 0.99, 2)
-                else:
-                    buy_final = buy_raw
+            if close is None or close == 0:
+                buy_final = sell_final = stop_final = None
+                stop_loss_pct = take_profit_pct = 0
+                hold_days = 5
+            elif strategy_type == "A":
+                # A型：突破型 — 严格止损，快速止盈
+                buy_final = round(close * 0.99, 2)
+                stop_final = round(close * 0.97, 2)   # -3%
+                sell_final = round(close * 1.05, 2)   # +5%
+                stop_loss_pct = 3
+                take_profit_pct = 5
+                hold_days = 5
             else:
-                buy_final = None
-            
-            # 最终卖出价：取压力位打折价，但至少比买入价高5%
-            if buy_final is not None:
-                if sell_raw is not None and sell_raw > buy_final:
-                    sell_final = sell_raw
-                else:
-                    sell_final = round(buy_final * 1.05, 2)
-            else:
-                sell_final = None
-            
-            # 非对称止损：
-            # A类（突破型）：止损窄（ATR × 1.5），突破失败跑得快
-            # B类（埋伏型）：止损宽（ATR × 2.0），给底部震荡留空间
-            if buy_final is not None:
-                if strategy_type == "A":
-                    stop_loss_atr = avg_atr * 1.5
-                else:
-                    stop_loss_atr = avg_atr * 2.0
-                
-                if stop_raw is not None and stop_raw < buy_final:
-                    # 取 SQL 计算的止损价和非对称止损中较保守的（较高的那个，即止损更早）
-                    stop_final = max(stop_raw, round(buy_final - stop_loss_atr, 2))
-                else:
-                    stop_final = round(buy_final - stop_loss_atr, 2)
-                # 止损价不能高于买入价
-                if stop_final >= buy_final:
-                    stop_final = round(buy_final * 0.95, 2)
-            else:
-                stop_final = None
+                # B型：埋伏型 — 宽止损，高止盈
+                buy_final = round(close * 0.99, 2)
+                stop_final = round(close * 0.95, 2)   # -5%
+                sell_final = round(close * 1.08, 2)   # +8%
+                stop_loss_pct = 5
+                take_profit_pct = 8
+                hold_days = 5
             
             # 构建评分说明（每个因子一行）
             score_detail_parts = []
@@ -1195,6 +1520,10 @@ def score_ai_stocks(ai_stocks: list) -> list:
             score_detail_parts.append(f"稳定:{f4}×{w4:.2f}={round(f4*w4,1)}")
             score_detail_parts.append(f"突破:{f5}×{w5:.2f}={round(f5*w5,1)}")
             score_detail_parts.append(f"箱体:{f6}×{w6:.2f}={round(f6*w6,1)}")
+            if rsi_adjustment:
+                score_detail_parts.append(f"RSI调:{rsi_adjustment:+.0f}")
+            if vol_penalty != 1.0:
+                score_detail_parts.append(f"量价折:×{vol_penalty}")
             if lh_bonus:
                 score_detail_parts.append(f"龙虎榜:{lh_bonus}")
             if institution_bonus:
@@ -1202,6 +1531,13 @@ def score_ai_stocks(ai_stocks: list) -> list:
             if ai_hot_bonus:
                 score_detail_parts.append(f"AI热度:{ai_hot_bonus}")
             score_detail = "\n".join(score_detail_parts) + f"\n总分={final_score}"
+            # 追加操作指南
+            score_detail += (
+                f"\n操作: 买入≤{buy_final} "
+                f"止损{stop_loss_pct}%({stop_final}) "
+                f"止盈{take_profit_pct}%({sell_final}) "
+                f"持有≤{hold_days}天"
+            )
 
             result.append({
                 "code": code,
@@ -1212,7 +1548,8 @@ def score_ai_stocks(ai_stocks: list) -> list:
                 "avg_amp_5d": sr["avg_amp_5d"],
                 "vol_ratio": sr["vol_ratio"],
                 "latest_close": close,
-                "rsi_divergence": sr["rsi_divergence"],
+                "rsi_value": round(rsi_value, 1),
+                "rsi_divergence": rsi_div,
                 "score": final_score,
                 "score_detail": score_detail,
                 "strategy_type": strategy_type,
@@ -1222,6 +1559,10 @@ def score_ai_stocks(ai_stocks: list) -> list:
                 "institution_ratio": lh.get("institution_ratio", 0.0),
                 "institution_bonus": institution_bonus,
                 "ai_hot_bonus": ai_hot_bonus,
+                # 操作规则（回测优化）
+                "stop_loss_pct": stop_loss_pct,
+                "take_profit_pct": take_profit_pct,
+                "hold_days": hold_days,
                 # 关键价位
                 "support_1": sr.get("support_1"),
                 "support_2": sr.get("support_2"),
@@ -1242,6 +1583,7 @@ def score_ai_stocks(ai_stocks: list) -> list:
                 "avg_amp_5d": None,
                 "vol_ratio": None,
                 "latest_close": None,
+                "rsi_value": None,
                 "rsi_divergence": None,
                 "score": -9999,  # 无数据排最后
                 "score_detail": "",
@@ -1254,6 +1596,9 @@ def score_ai_stocks(ai_stocks: list) -> list:
                 "buy_price": None,
                 "sell_price": None,
                 "stop_loss": None,
+                "stop_loss_pct": 0,
+                "take_profit_pct": 0,
+                "hold_days": 5,
             })
 
     # 按评分排序

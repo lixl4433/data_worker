@@ -30,12 +30,12 @@ def save_score_board_to_db(date_key: str, stocks: list):
                         unique_sources.append(src)
                 sources_str = ",".join(unique_sources)
             cursor.execute("""
-                INSERT OR REPLACE INTO score_board 
+                INSERT OR REPLACE INTO score_board
                 (date_key, code, name, sector, reason, score, total_score, avg_pct_5d, vol_ratio,
                  latest_close, rsi_divergence, strategy_type, support_1, support_2,
                  resistance_1, resistance_2, buy_price, sell_price, stop_loss, sources, rank,
-                 score_detail)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 score_detail, stop_loss_pct, take_profit_pct, hold_days)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 date_key, s.get("code", ""), s.get("name", ""), s.get("sector", ""),
                 s.get("reason", ""), s.get("score"), s.get("total_score"),
@@ -45,7 +45,8 @@ def save_score_board_to_db(date_key: str, stocks: list):
                 s.get("resistance_1"), s.get("resistance_2"),
                 s.get("buy_price"), s.get("sell_price"), s.get("stop_loss"),
                 sources_str, s.get("rank", 0),
-                s.get("score_detail", "")
+                s.get("score_detail", ""),
+                s.get("stop_loss_pct", 0), s.get("take_profit_pct", 0), s.get("hold_days", 5),
             ))
         conn.commit()
         logger.info(f"综合评分已保存: date_key={date_key}, count={len(stocks)}")

@@ -54,6 +54,9 @@ function renderScoreResult() {
         var buyColor = (s.buy_price != null && s.latest_close != null && s.buy_price < s.latest_close) ? '#2ecc71' : '#8888aa';
         var sellColor = (s.sell_price != null && s.latest_close != null && s.sell_price > s.latest_close) ? '#2ecc71' : '#8888aa';
         var stopColor = (s.stop_loss != null && s.latest_close != null && s.stop_loss < s.latest_close) ? '#e74c3c' : '#8888aa';
+        var stopPct = (s.stop_loss_pct != null) ? '-' + s.stop_loss_pct + '%' : '-';
+        var takePct = (s.take_profit_pct != null) ? '+' + s.take_profit_pct + '%' : '-';
+        var holdDays = s.hold_days || '-';
 
         var scoreDetail = s.score_detail || '';
         var reasonText = s.reason || '-';
@@ -82,6 +85,9 @@ function renderScoreResult() {
             '<td class="price-cell" style="color:' + buyColor + ';font-weight:600;">' + buyPrice + '</td>' +
             '<td class="price-cell" style="color:' + sellColor + ';font-weight:600;">' + sellPrice + '</td>' +
             '<td class="price-cell" style="color:' + stopColor + ';font-weight:600;">' + stopLoss + '</td>' +
+            '<td class="price-cell" style="color:#dc2626;font-weight:600;">' + stopPct + '</td>' +
+            '<td class="price-cell" style="color:#16a34a;font-weight:600;">' + takePct + '</td>' +
+            '<td class="price-cell">' + holdDays + '天</td>' +
             '<td class="tip-trigger" data-tip="' + detailForTip + '" style="font-size:10px;color:var(--text-secondary);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;">' + (detailForDisplay || '-') + '</td>' +
             '<td class="reason-cell tip-trigger" data-tip="' + reasonEscaped + '">' + reasonText + '</td>' +
             '</tr>';

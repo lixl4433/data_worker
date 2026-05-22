@@ -64,6 +64,15 @@
         </span>
     </div>
 
+    <!-- 操作规则提示 -->
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.6;">
+        <strong style="color:#166534;">📋 操作规则（基于历史回测优化）</strong><br>
+        <span style="color:#374151;">
+        🚀 <strong>A型（突破型）</strong>：买入≤现价×0.99 &nbsp;|&nbsp; 止损 <span style="color:#dc2626;font-weight:600;">-3%</span> &nbsp;|&nbsp; 止盈 <span style="color:#16a34a;font-weight:600;">+5%</span> &nbsp;|&nbsp; 持有 ≤5天<br>
+        🛡️ <strong>B型（埋伏型）</strong>：买入≤现价×0.99 &nbsp;|&nbsp; 止损 <span style="color:#dc2626;font-weight:600;">-5%</span> &nbsp;|&nbsp; 止盈 <span style="color:#16a34a;font-weight:600;">+8%</span> &nbsp;|&nbsp; 持有 ≤5天
+        </span>
+    </div>
+
     <div class="result-table-wrap" style="overflow-x:auto;">
         <table class="score-table">
             <thead>
@@ -74,9 +83,12 @@
                     <th title="支撑位2：近20日最低价（短期支撑）">支撑②</th>
                     <th title="压力位1：近60日箱体顶部（强压力）">压力①</th>
                     <th title="压力位2：近20日最高价（短期压力）">压力②</th>
-                    <th title="买入价：支撑位上方3%（趋势确认价）">买入价</th>
-                    <th title="卖出价：压力位下方2%（止盈位）">卖出价</th>
-                    <th title="止损价：支撑位下方3%">止损价</th>
+                    <th title="建议买入价（现价下方1%挂单）">买入价</th>
+                    <th title="建议止盈价">止盈价</th>
+                    <th title="建议止损价">止损价</th>
+                    <th title="止损百分比">止损%</th>
+                    <th title="止盈百分比">止盈%</th>
+                    <th title="最长持有天数">持有</th>
                     <th>评分说明</th>
                     <th>理由</th>
                 </tr>
