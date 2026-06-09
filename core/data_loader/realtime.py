@@ -5,7 +5,7 @@ from typing import Optional, List
 
 import pandas as pd
 
-from .config import logger, TODAY, PYTDX_IPS
+from .config import logger, get_today, PYTDX_IPS
 
 
 def _akshare_get_realtime(codes: List[str]) -> Optional[pd.DataFrame]:
@@ -18,7 +18,7 @@ def _akshare_get_realtime(codes: List[str]) -> Optional[pd.DataFrame]:
             if df_filtered.empty:
                 return None
             result = pd.DataFrame()
-            result["trade_date"] = TODAY
+            result["trade_date"] = get_today()
             result["code"] = df_filtered["代码"].astype(str).str.strip()
             result["name"] = df_filtered["名称"]
             result["open"] = pd.to_numeric(df_filtered.get("今开", 0), errors="coerce")
@@ -72,7 +72,7 @@ def _pytdx_get_realtime(codes: List[str]) -> Optional[pd.DataFrame]:
                 if data:
                     for item in data:
                         records.append({
-                            "trade_date": TODAY,
+                            "trade_date": get_today(),
                             "code": str(item.get("code", "")),
                             "name": str(item.get("name", "")),
                             "open": float(item.get("open", 0)),
@@ -95,7 +95,7 @@ def _pytdx_get_realtime(codes: List[str]) -> Optional[pd.DataFrame]:
                 if data:
                     for item in data:
                         records.append({
-                            "trade_date": TODAY,
+                            "trade_date": get_today(),
                             "code": str(item.get("code", "")),
                             "name": str(item.get("name", "")),
                             "open": float(item.get("open", 0)),

@@ -6,7 +6,7 @@ import signal
 import sys
 from datetime import datetime, timedelta
 
-from .config import logger, START_DATE, TODAY
+from .config import logger, START_DATE, get_today
 from .db import get_connection, ensure_table_schema, ensure_stock_cache_table, batch_insert
 from .history import get_trade_dates, fetch_by_trade_date
 from .realtime import get_realtime_data
@@ -152,7 +152,7 @@ def update_full():
 
         # 2. 获取交易日历
         update_status["progress"] = "获取交易日历..."
-        trade_dates = get_trade_dates(START_DATE, TODAY)
+        trade_dates = get_trade_dates(START_DATE, get_today())
         logger.info(f"共 {len(trade_dates)} 个交易日")
 
         # 3. 按交易日逐个获取并写入
@@ -207,7 +207,7 @@ def update_incremental():
 
         # 1. 获取交易日历
         update_status["progress"] = "获取交易日历..."
-        all_dates = get_trade_dates(START_DATE, TODAY)
+        all_dates = get_trade_dates(START_DATE, get_today())
         logger.info(f"共 {len(all_dates)} 个交易日")
 
         # 2. 获取数据库中最大 TuShare 交易日
@@ -315,11 +315,11 @@ def update_realtime():
 
         # 4. 补充换手率和振幅
         update_status["progress"] = "补充换手率和振幅..."
-        enrich_turnover_and_amplitude(TODAY)
+        enrich_turnover_and_amplitude(get_today())
 
         # 5. 数据完整性校验
         update_status["progress"] = "数据完整性校验..."
-        result = validate_data_integrity(TODAY)
+        result = validate_data_integrity(get_today())
         for msg in result["messages"]:
             logger.info(msg)
 

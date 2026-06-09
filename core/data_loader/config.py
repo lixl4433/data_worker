@@ -17,7 +17,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 START_DATE = "20250101"
-TODAY = __import__("datetime").datetime.now().strftime("%Y%m%d")
+def get_today() -> str:
+    """动态获取当前日期 YYYYMMDD，确保每次调用都是最新日期"""
+    return __import__("datetime").datetime.now().strftime("%Y%m%d")
 SQL_BATCH_SIZE = 500
 
 # Pytdx IP 列表（统一从 config.py 导入）

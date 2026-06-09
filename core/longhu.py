@@ -171,6 +171,86 @@ def fetch_longhu_list(trade_date: Optional[str] = None) -> list:
     if not trade_date:
         trade_date = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
+    # 优先使用数据中心 API 按日期查询（支持历史日期）
+    stocks = _fetch_longhu_via_datacenter(trade_date)
+    if stocks:
+        return stocks
+
+    # 回退到 push2 API（仅返回最新交易日数据，日期标签用实际数据日期）
+    logger.info(f"数据中心 API 无数据，尝试 push2 API...")
+    stocks = _fetch_longhu_via_push2(trade_date)
+    if stocks:
+        return stocks
+
+    return []
+
+
+def _fetch_longhu_via_datacenter(trade_date: str) -> list:
+    """通过东方财富数据中心 API 按日期获取龙虎榜"""
+    proxy = _get_proxy()
+    client_kwargs = {"timeout": 15}
+    if proxy:
+        client_kwargs["proxy"] = proxy
+
+    try:
+        formatted_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+        with httpx.Client(**client_kwargs) as client:
+            params = {
+                "reportName": "RPT_LHB_FORMMARKET",
+                "columns": "SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,CHANGE_RATE,CLOSE_PRICE,TURNOVERRATE,NET_BUY_AMOUNT,NET_BUY_AMOUNT_RATIO,BUY_AMOUNT,SELL_AMOUNT",
+                "filter": f"(TRADE_DATE='{formatted_date}')",
+                "pageNumber": "1",
+                "pageSize": "500",
+                "sortTypes": "-1",
+                "sortColumns": "NET_BUY_AMOUNT",
+                "source": "WEB",
+                "client": "WEB",
+            }
+            resp = client.get(LONGHU_DETAIL_API, params=params)
+            data = resp.json()
+
+            stocks = []
+            if data and data.get("result") and data["result"].get("data"):
+                for item in data["result"]["data"]:
+                    code = str(item.get("SECURITY_CODE", "")).strip()
+                    name = str(item.get("SECURITY_NAME_ABBR", "")).strip()
+                    if not code or not name:
+                        continue
+
+                    total_buy = float(item.get("BUY_AMOUNT", 0) or 0)
+                    total_sell = float(item.get("SELL_AMOUNT", 0) or 0)
+                    net_buy = float(item.get("NET_BUY_AMOUNT", 0) or 0)
+                    net_buy_ratio = float(item.get("NET_BUY_AMOUNT_RATIO", 0) or 0)
+                    amount = total_buy + total_sell
+
+                    stocks.append({
+                        "code": code,
+                        "name": name,
+                        "trade_date": trade_date,
+                        "board_type": "",
+                        "reason": "",
+                        "total_buy": round(total_buy, 2),
+                        "total_sell": round(total_sell, 2),
+                        "net_buy": round(net_buy, 2),
+                        "net_buy_ratio": net_buy_ratio,
+                        "pct_chg": float(item.get("CHANGE_RATE", 0) or 0),
+                        "amount": amount,
+                        "turnover_rate": float(item.get("TURNOVERRATE", 0) or 0),
+                    })
+
+                logger.info(f"数据中心 API 龙虎榜: 获取到 {len(stocks)} 只股票 ({trade_date})")
+                return stocks
+
+        logger.info(f"数据中心 API 无数据: {trade_date}")
+        return []
+
+    except Exception as e:
+        logger.warning(f"数据中心 API 获取龙虎榜失败: {e}")
+        return []
+
+
+def _fetch_longhu_via_push2(trade_date: str) -> list:
+    """通过东方财富 push2 API 获取最新龙虎榜（无日期过滤，仅作降级方案）"""
     proxy = _get_proxy()
     client_kwargs = {"timeout": 15}
     if proxy:
@@ -178,7 +258,6 @@ def fetch_longhu_list(trade_date: Optional[str] = None) -> list:
 
     try:
         with httpx.Client(**client_kwargs) as client:
-            # 东方财富龙虎榜接口
             params = {
                 "fid": "f3",
                 "po": "1",
@@ -204,14 +283,10 @@ def fetch_longhu_list(trade_date: Optional[str] = None) -> list:
 
                     total_buy = float(item.get("f40", 0) or 0)
                     net_buy = float(item.get("f42", 0) or 0)
-                    # f41 是卖出占比(%)，不是卖出总额
-                    # 卖出总额 = 买入总额 - 净买入额
                     total_sell = total_buy - net_buy
                     if total_sell < 0:
                         total_sell = 0
 
-                    # 计算净买入占流通市值比例
-                    # 流通市值 ≈ 成交额 / (换手率/100)
                     amount = float(item.get("f6", 0) or 0)
                     turnover_rate = float(item.get("f8", 0) or 0)
                     net_buy_ratio = 0.0
@@ -235,11 +310,11 @@ def fetch_longhu_list(trade_date: Optional[str] = None) -> list:
                         "turnover_rate": turnover_rate,
                     })
 
-            logger.info(f"东方财富龙虎榜: 获取到 {len(stocks)} 只股票")
+            logger.info(f"Push2 API 龙虎榜: 获取到 {len(stocks)} 只股票")
             return stocks
 
     except Exception as e:
-        logger.error(f"获取龙虎榜列表失败: {e}")
+        logger.error(f"Push2 API 获取龙虎榜失败: {e}")
         return []
 
 
@@ -842,9 +917,7 @@ def update_longhu():
                 break
 
         if saved_date:
-            # 成功获取数据后才更新缓存
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM longhu_cache")
+            # 成功获取数据后更新缓存（保留历史日期的缓存，不删除）
             _save_longhu_cache(conn, saved_date, deepseek_raw=deepseek_data if deepseek_data else None)
             logger.info(f"龙虎榜更新完成，共 {total} 条记录")
             return {"code": 0, "message": f"龙虎榜更新完成，共 {total} 条", "count": total}

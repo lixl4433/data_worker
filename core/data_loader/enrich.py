@@ -9,7 +9,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .config import logger, START_DATE, TODAY
+from .config import logger, START_DATE
 from .db import get_connection, _calc_amplitude
 
 
